@@ -155,35 +155,126 @@ def get_expense_analysis(job_id):
         "ExpenseDocuments": expense_documents,
     }
 
+# def find_summary_field(summary_fields, field_type):
+#     """Helper function to find a specific field in the SummaryFields list."""
+#     for field in summary_fields:
+#         if field.get('Type', {}).get('Text') == field_type:
+#             return field.get('ValueDetection', {}).get('Text', 'N/A').strip()
+#     return "N/A"
+
+# def find_grouped_field(summary_fields, group_type, field_type):
+#     """Helper function to find fields based on GroupProperties like VENDOR or RECEIVER."""
+#     for field in summary_fields:
+#         # Check if the field has GroupProperties
+#         if 'GroupProperties' in field:
+#             for prop in field['GroupProperties']:
+#                 # Check if the desired group_type (e.g., "VENDOR") is in this group
+#                 if group_type in prop.get('Types', []):
+#                     # If the field_type matches, return the value
+#                     if field.get('Type', {}).get('Text') == field_type:
+#                         return field.get('ValueDetection', {}).get('Text', 'N/A').strip()
+#     return "N/A"
+
+# def process_output(data):
+#     """
+#     Processes the raw Textract data and returns a structured list of dictionaries.
+#     """
+#     processed_docs = []
+
+#     # Consolidate all summary fields from all pages for easier searching
+#     all_summary_fields = []
+#     # for doc in data.get('ExpenseDocuments', []):
+#     for doc in data:
+#         all_summary_fields.extend(doc.get('SummaryFields', []))
+
+#     # --- Build the primary JSON object with consolidated data ---
+#     summary_data = {
+#         "invoice_id": find_summary_field(all_summary_fields, "INVOICE_RECEIPT_ID"),
+#         "invoice_date": find_summary_field(all_summary_fields, "INVOICE_RECEIPT_DATE"),
+#         "due_date": find_summary_field(all_summary_fields, "DUE_DATE"),
+#         "total": find_summary_field(all_summary_fields, "TOTAL"),
+#         "po_number": find_summary_field(all_summary_fields, "PO_NUMBER")
+#     }
+
+#     vendor_data = {
+#         "name": find_grouped_field(all_summary_fields, "VENDOR", "NAME"),
+#         "address": find_grouped_field(all_summary_fields, "VENDOR", "ADDRESS"),
+#         "tax_id": find_summary_field(all_summary_fields, "TAX_PAYER_ID")
+#     }
+
+#     receiver_data = {
+#         "name": find_grouped_field(all_summary_fields, "RECEIVER_BILL_TO", "NAME"),
+#         "billing_address": find_grouped_field(all_summary_fields, "RECEIVER_BILL_TO", "ADDRESS"),
+#         "shipping_address": find_grouped_field(all_summary_fields, "RECEIVER_SHIP_TO", "ADDRESS")
+#     }
+
+#     # --- Process Line Items ---
+#     line_items_data = []
+#     # Loop through documents to find the one with line items
+#     # for doc in data.get('ExpenseDocuments', []):
+#     for doc in data:
+#         line_item_groups = doc.get('LineItemGroups', [])
+#         if line_item_groups:
+#             for group in line_item_groups:
+#                 for item in group.get('LineItems', []):
+#                     item_details = {}
+#                     for field in item.get('LineItemExpenseFields', []):
+#                         field_type = field.get('Type', {}).get('Text', '').lower()
+#                         field_value = field.get('ValueDetection', {}).get('Text', 'N/A').replace('\n', ' ')
+#                         item_details[field_type] = field_value
+#                     line_items_data.append(item_details)
+
+#     # --- Assemble the final JSON object ---
+#     final_json = {
+#         "summary": summary_data,
+#         "vendor": vendor_data,
+#         "receiver": receiver_data,
+#         "line_items": line_items_data
+#     }
+
+#     return final_json
+
 def find_summary_field(summary_fields, field_type):
-    """Helper function to find a specific field in the SummaryFields list."""
+    """
+    Helper function to find a specific field and its confidence in the SummaryFields list.
+    Returns a dictionary with 'value' and 'confidence'.
+    """
     for field in summary_fields:
         if field.get('Type', {}).get('Text') == field_type:
-            return field.get('ValueDetection', {}).get('Text', 'N/A').strip()
-    return "N/A"
+            value_detection = field.get('ValueDetection', {})
+            value = value_detection.get('Text', 'N/A').strip()
+            confidence = value_detection.get('Confidence', 0.0)
+            return {'value': value, 'confidence': confidence}
+    return {'value': 'N/A', 'confidence': 0.0}
 
 def find_grouped_field(summary_fields, group_type, field_type):
-    """Helper function to find fields based on GroupProperties like VENDOR or RECEIVER."""
+    """
+    Helper function to find grouped fields and their confidence.
+    Returns a dictionary with 'value' and 'confidence'.
+    """
     for field in summary_fields:
         # Check if the field has GroupProperties
         if 'GroupProperties' in field:
             for prop in field['GroupProperties']:
                 # Check if the desired group_type (e.g., "VENDOR") is in this group
                 if group_type in prop.get('Types', []):
-                    # If the field_type matches, return the value
+                    # If the field_type matches, return the value and confidence
                     if field.get('Type', {}).get('Text') == field_type:
-                        return field.get('ValueDetection', {}).get('Text', 'N/A').strip()
-    return "N/A"
+                        value_detection = field.get('ValueDetection', {})
+                        value = value_detection.get('Text', 'N/A').strip()
+                        confidence = value_detection.get('Confidence', 0.0)
+                        return {'value': value, 'confidence': confidence}
+    return {'value': 'N/A', 'confidence': 0.0}
 
 def process_output(data):
     """
-    Processes the raw Textract data and returns a structured list of dictionaries.
+    Processes the raw Textract data and returns a structured list of dictionaries,
+    including confidence scores for each extracted value.
     """
     processed_docs = []
 
     # Consolidate all summary fields from all pages for easier searching
     all_summary_fields = []
-    # for doc in data.get('ExpenseDocuments', []):
     for doc in data:
         all_summary_fields.extend(doc.get('SummaryFields', []))
 
@@ -211,7 +302,6 @@ def process_output(data):
     # --- Process Line Items ---
     line_items_data = []
     # Loop through documents to find the one with line items
-    # for doc in data.get('ExpenseDocuments', []):
     for doc in data:
         line_item_groups = doc.get('LineItemGroups', [])
         if line_item_groups:
@@ -220,8 +310,15 @@ def process_output(data):
                     item_details = {}
                     for field in item.get('LineItemExpenseFields', []):
                         field_type = field.get('Type', {}).get('Text', '').lower()
-                        field_value = field.get('ValueDetection', {}).get('Text', 'N/A').replace('\n', ' ')
-                        item_details[field_type] = field_value
+                        value_detection = field.get('ValueDetection', {})
+                        
+                        field_value = value_detection.get('Text', 'N/A').replace('\n', ' ')
+                        field_confidence = value_detection.get('Confidence', 0.0)
+                        
+                        item_details[field_type] = {
+                            'value': field_value,
+                            'confidence': field_confidence
+                        }
                     line_items_data.append(item_details)
 
     # --- Assemble the final JSON object ---

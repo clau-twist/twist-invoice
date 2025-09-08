@@ -5,69 +5,16 @@ from typing import List, Dict, Any, Optional
 textract_client = boto3.client("textract")
 s3_client = boto3.client("s3")
 
-
 def _write_to_s3(expense_document: Any, *,
                  output_bucket: str = "twist-invoices-processed",
                  output_key: str) -> None:
     body = json.dumps(expense_document, ensure_ascii=False, indent=2).encode("utf-8")
-    print(f"this is expense: {expense_document}")
-    print(f"this is output key: {output_key}")
     s3_client.put_object(
         Bucket=output_bucket,
         Key=output_key,
         Body=body,
         ContentType="application/json"
     )
-
-def get_expense(job_id):
-    """
-    Retrieves the expense analysis results for a given job ID.
-
-    Parameters:
-    ----------
-    job_id: str, required
-        The unique identifier for the expense analysis job.
-
-    Returns:
-    -------
-    dict
-        The expense analysis results.
-    """
-
-    textract_client = boto3.client("textract")
-
-    # Gather all pages
-    expense_documents: List[Dict[str, Any]] = []
-    document_metadata: Optional[Dict[str, Any]] = None
-    warnings: Optional[List[Dict[str, Any]]] = None
-    next_token: Optional[str] = None
-
-    while True:
-        if next_token:
-            page = textract_client.get_expense(JobId=job_id, NextToken=next_token)
-        else:
-            page = textract_client.get_expense(JobId=job_id)
-
-        document_metadata = page.get("DocumentMetadata") or document_metadata
-        warnings = page.get("Warnings") or warnings
-        expense_documents.extend(page.get("ExpenseDocuments", []))
-        next_token = page.get("NextToken")
-        if not next_token:
-            break
-
-    try:
-        processed_output = process_output(expense_documents)
-    except Exception as e:
-        print(f"Error processing: {e}")
-        processed_output = expense_documents
-
-    return {
-        "JobId": job_id,
-        "JobStatus": "SUCCEEDED",
-        "DocumentMetadata": document_metadata,
-        "Warnings": warnings,
-        "ExpenseDocuments": expense_documents,
-    }
 
 def find_summary_field(summary_fields, field_type):
     """
@@ -146,10 +93,10 @@ def process_output(data):
                     for field in item.get('LineItemExpenseFields', []):
                         field_type = field.get('Type', {}).get('Text', '').lower()
                         value_detection = field.get('ValueDetection', {})
-
+                        
                         field_value = value_detection.get('Text', 'N/A').replace('\n', ' ')
                         field_confidence = value_detection.get('Confidence', 0.0)
-
+                        
                         item_details[field_type] = {
                             'value': field_value,
                             'confidence': field_confidence
@@ -165,6 +112,58 @@ def process_output(data):
     }
 
     return final_json
+
+def get_analysis(job_id):
+    """
+    Retrieves the expense analysis results for a given job ID.
+
+    Parameters:
+    ----------
+    job_id: str, required
+        The unique identifier for the expense analysis job.
+
+    Returns:
+    -------
+    dict
+        The expense analysis results.
+    """
+
+    textract_client = boto3.client("textract")
+
+    # Gather all pages
+    expense_documents: List[Dict[str, Any]] = []
+    document_metadata: Optional[Dict[str, Any]] = None
+    warnings: Optional[List[Dict[str, Any]]] = None
+    next_token: Optional[str] = None
+
+    while True:
+        if next_token:
+            page = textract_client.get_expense_analysis(JobId=job_id, NextToken=next_token)
+        else:
+            page = textract_client.get_expense_analysis(JobId=job_id)
+
+        document_metadata = page.get("DocumentMetadata") or document_metadata
+        warnings = page.get("Warnings") or warnings
+        expense_documents.extend(page.get("ExpenseDocuments", []))
+        next_token = page.get("NextToken")
+        if not next_token:
+            break
+
+    try:
+        processed_output = process_output(expense_documents)
+    except Exception as e:
+        print(f"Error processing: {e}")
+        processed_output = expense_documents
+
+    return {
+        "JobId": job_id,
+        "JobStatus": "SUCCEEDED",
+        "DocumentMetadata": document_metadata,
+        "Warnings": warnings,
+       "ExpenseDocuments": processed_output,
+        # "ExpenseDocuments": expense_documents,
+    }
+
 
 def lambda_handler(event, context):
     """
@@ -210,9 +209,9 @@ def lambda_handler(event, context):
         except json.JSONDecodeError:
             print("SNS message is not a valid JSON string.")
             # Handle as plain text
-
+    
     results = get_analysis(job_id=job_id)
-    _write_to_s3(results.get("ExpenseDocuments"), output_key=key.removesuffix(".pdf")+".json")
+    _write_to_s3(results.get("ExpenseDocuments"), output_key=job_id+"/result.json")
 
     return {
         'statusCode': 200,
